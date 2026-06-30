@@ -18,7 +18,7 @@
 <br>
 
 <!-- ── LIVE DEMO BADGE — UPDATE URL AFTER DEPLOY ── -->
-<a href="https://YOUR_DEPLOYED_URL_HERE">
+<a href="https://nagarai-alpha.vercel.app">
   <img src="https://img.shields.io/badge/🚀_Live_Demo-Click_Here-6366f1?style=for-the-badge&logoColor=white" alt="Live Demo"/>
 </a>
 
