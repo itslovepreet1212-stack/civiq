@@ -22,15 +22,20 @@ export function useIssues() {
 
   const fetchIssues = useCallback(async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from("issues")
-      .select("*")
-      .order("created_at", { ascending: false });
-    if (error) {
+    try {
+      const { data, error } = await supabase
+        .from("issues")
+        .select("*")
+        .order("created_at", { ascending: false });
+      if (error) {
+        const local = loadLocal();
+        setIssues(local);
+      } else {
+        setIssues(data || []);
+      }
+    } catch {
       const local = loadLocal();
       setIssues(local);
-    } else {
-      setIssues(data || []);
     }
     setLoading(false);
   }, []);
@@ -41,40 +46,35 @@ export function useIssues() {
   const addIssue = async ({ imageFile, ...fields }) => {
     let image_url = null;
     if (imageFile) {
-      const safeName = `${Date.now()}-${encodeURIComponent(imageFile.name)}`;
-      const { error: upErr } = await supabase.storage
-        .from("issue-images")
-        .upload(safeName, imageFile);
-      if (!upErr) {
-        const { data: urlData } = supabase.storage
+      try {
+        const safeName = `${Date.now()}-${encodeURIComponent(imageFile.name)}`;
+        const { error: upErr } = await supabase.storage
           .from("issue-images")
-          .getPublicUrl(safeName);
-        image_url = urlData?.publicUrl || null;
+          .upload(safeName, imageFile);
+        if (!upErr) {
+          const { data: urlData } = supabase.storage
+            .from("issue-images")
+            .getPublicUrl(safeName);
+          image_url = urlData?.publicUrl || null;
+        }
+      } catch {
+        // storage upload failed, proceed without image
       }
     }
 
-    const { data, error } = await supabase
-      .from("issues")
-      .insert([{ ...fields, image_url, status: "Reported", upvotes: 0 }])
-      .select();
-    if (error) {
-      const localIssue = {
-        id: crypto.randomUUID(),
-        created_at: new Date().toISOString(),
-        ...fields,
-        image_url,
-        status: "Reported",
-        upvotes: 0,
-      };
-      const current = loadLocal();
-      saveLocal([localIssue, ...current]);
-      setIssues((p) => [localIssue, ...p]);
-      window.dispatchEvent(new CustomEvent("nagarai-issue-updated"));
-      return localIssue;
-    }
-    setIssues((p) => [data[0], ...p]);
+    const localIssue = {
+      id: crypto.randomUUID(),
+      created_at: new Date().toISOString(),
+      ...fields,
+      image_url,
+      status: "Reported",
+      upvotes: 0,
+    };
+    const current = loadLocal();
+    saveLocal([localIssue, ...current]);
+    setIssues((p) => [localIssue, ...p]);
     window.dispatchEvent(new CustomEvent("nagarai-issue-updated"));
-    return data[0];
+    return localIssue;
   };
 
   const upvoteIssue = async (id) => {
@@ -83,11 +83,7 @@ export function useIssues() {
     const newUpvotes = (issue.upvotes || 0) + 1;
     const newStatus =
       newUpvotes >= 5 && issue.status === "Reported" ? "Verified" : issue.status;
-    const { error } = await supabase
-      .from("issues")
-      .update({ upvotes: newUpvotes, status: newStatus })
-      .eq("id", id);
-    if (error) {
+    const fallback = () => {
       const current = loadLocal();
       const updated = current.map((i) =>
         i.id === id ? { ...i, upvotes: newUpvotes, status: newStatus } : i
@@ -96,24 +92,37 @@ export function useIssues() {
       setIssues((p) =>
         p.map((i) => (i.id === id ? { ...i, upvotes: newUpvotes, status: newStatus } : i))
       );
-      return;
-    }
-    setIssues((p) =>
-      p.map((i) => (i.id === id ? { ...i, upvotes: newUpvotes, status: newStatus } : i))
-    );
-    window.dispatchEvent(new CustomEvent("nagarai-issue-updated"));
-    if (newStatus === "Verified") toast.success("Issue verified by community!");
+      window.dispatchEvent(new CustomEvent("nagarai-issue-updated"));
+      if (newStatus === "Verified") toast.success("Issue verified by community!");
+    };
+    try {
+      const { error } = await supabase
+        .from("issues")
+        .update({ upvotes: newUpvotes, status: newStatus })
+        .eq("id", id);
+      if (error) { fallback(); return; }
+      setIssues((p) =>
+        p.map((i) => (i.id === id ? { ...i, upvotes: newUpvotes, status: newStatus } : i))
+      );
+      window.dispatchEvent(new CustomEvent("nagarai-issue-updated"));
+      if (newStatus === "Verified") toast.success("Issue verified by community!");
+    } catch { fallback(); }
   };
 
   const updateStatus = async (id, status) => {
-    const { error } = await supabase.from("issues").update({ status }).eq("id", id);
-    if (error) {
+    const fallback = () => {
       const current = loadLocal();
       const updated = current.map((i) => (i.id === id ? { ...i, status } : i));
       saveLocal(updated);
-    }
-    setIssues((p) => p.map((i) => (i.id === id ? { ...i, status } : i)));
-    window.dispatchEvent(new CustomEvent("nagarai-issue-updated"));
+      setIssues((p) => p.map((i) => (i.id === id ? { ...i, status } : i)));
+      window.dispatchEvent(new CustomEvent("nagarai-issue-updated"));
+    };
+    try {
+      const { error } = await supabase.from("issues").update({ status }).eq("id", id);
+      if (error) { fallback(); return; }
+      setIssues((p) => p.map((i) => (i.id === id ? { ...i, status } : i)));
+      window.dispatchEvent(new CustomEvent("nagarai-issue-updated"));
+    } catch { fallback(); }
   };
 
   return { issues, loading, addIssue, upvoteIssue, updateStatus, refetch: fetchIssues };
